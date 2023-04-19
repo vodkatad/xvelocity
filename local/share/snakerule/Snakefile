@@ -1,0 +1,181 @@
+SRC_DIR='/home/data/Dropbox/work/velocity'
+
+#data@rotpunkt:~/work/stash/velocity/new$ head -n1  egrassi-2021-01-21_placebo.txt | tr "\t" "\n" | grep -n 'Start date_0'
+# 193:T:Treatments - Start date_0
+# data@rotpunkt:~/work/stash/velocity/new$ head -n1  egrassi-2021-01-21_placebo.txt | tr "\t" "\n" | grep -n 'End date_0'
+# 195:T:Treatments - End date_0
+# data@rotpunkt:~/work/stash/velocity/new$ head -n1  egrassi-2021-01-21_cetuxi6w.txt | tr "\t" "\n" | grep -n 'Start date_0'
+# 201:T:Treatments - Start date_0
+# data@rotpunkt:~/work/stash/velocity/new$ head -n1  egrassi-2021-01-21_cetuxi6w.txt | tr "\t" "\n" | grep -n 'End date_0'
+# 203:T:Treatments - End date_0
+START_DATE_I = {
+    'cetuxi6w': 200,
+    'placebo': 192
+}
+END_DATE_I = {
+    'cetuxi6w': 202,
+    'placebo': 194
+}
+rule preprocess:
+    input: 'egrassi-2021-01-21_{arm}.txt'
+    output: '{arm}_long.tsv.gz'
+    params: tool=SRC_DIR+'/process_las_removeNoneDate.pl', starti= lambda w: START_DATE_I[w.arm], endi=lambda w: END_DATE_I[w.arm]
+    log: '{arm}_long.tsv.gz.log'
+    shell:
+        """
+            egrep 'CRC|Genealogy' {input} | {params.tool} {params.starti} {params.endi} 2> {log} | gzip > {output}
+        """
+
+# without grep CRC there are issues in some HNC and other entries with some empty fields:
+#Use of uninitialized value within @line in string ne at /home/data/Dropbox/work/velocity/process_las_placebo_removeNoneDate.pl line 39, <STDIN> line 795.
+
+rule expg:
+    input: "{arm}_long.tsv.gz"
+    output: "{arm}_expg"
+    shell:  
+        """
+            zcat {input} | cut -f 2 |sort | uniq > {output}
+        """
+
+rule lgenealogy:
+    input: "{arm}_long.tsv.gz"
+    output: "{arm}_longen"
+    shell:  
+        """
+            zcat {input} | cut -f 1 |sort | uniq > {output}
+        """
+
+rule genealogy:
+    input: "{arm}_long.tsv.gz"
+    output: "{arm}_gen"
+    shell:  
+        """
+            zcat {input} | bawk '{{print substr($1,0,7)}}' |sort | uniq > {output}
+        """
+
+rule filter:
+    input: ce='cetuxi6w_longen', pla='placebo_longen'
+    output: 'remove'
+    shell:
+        """
+            filter_1col 1 io {input.ce} < {input.pla} | bawk '{{print substr($1,0,12)}}' | sort |uniq  > {output}
+        """
+
+rule endprocess:
+    input: data="{arm}_long.tsv.gz", fi='remove'
+    output: "{arm}_long_header.tsv.gz"
+    shell:
+        """
+            echo -e "longen\\texp_group\\tstart_date\\tend_date\\tmeasure_date\\tvolume" > {output}.tmp
+            zcat {input.data} | bawk '{{print substr($1,0,12),$0}}' | filter_1col -v 1 {input.fi} | cut -f 1 --complement >> {output}.tmp
+            gzip -c {output}.tmp > {output}
+            rm {output}.tmp
+        """
+
+rule want_genetic:
+    input: ce="cetuxi6w_long_header.tsv.gz", pla="placebo_long_header.tsv.gz"
+    output: "wanted_sgen"
+    shell:
+        """
+            zcat {input.ce} | sed 1d | bawk '{{print substr($1,0,7)}}' > {output}.tmp
+            zcat {input.pla} | sed 1d | bawk '{{print substr($1,0,7)}}' >> {output}.tmp
+            cat {output}.tmp | sort | uniq > {output}
+            rm {output}.tmp
+        """
+
+rule preprocess_mut:
+    input: data="dtb_mutations_point.txt", filter="wanted_sgen"
+    output: "dtb_snv.txt"
+    shell:
+        """
+            cat {input.data} | filter_1col 1 <(cat <(echo 'sgen') {input.filter}) > {output}
+        """
+
+rule preprocess_ampdel:
+    input: data="dtb_mutations_ampdel.txt", filter="wanted_sgen"
+    output: "dtb_ampdel.txt"
+    shell:
+        """
+            cat {input.data} | filter_1col 1 <(cat <(echo 'sgen') {input.filter}) | sed 's/\\t-\\-/\\t\\t/g' | sed 's/\\t-$/\\t/1' \
+            | perl -ane 'if ($F[1] ne "") {{ if ($F[1] >= 3) {{$F[1] = "amp";}} else {{ $F[1]="wt"}} }} if ($F[2] ne "") {{ if ($F[2] >= 3) {{$F[2] = "amp";}}  else {{ $F[2] = "wt"}}  }} if ($F[3] ne "")  {{  if ($F[3] >= 3) {{$F[3] = "amp";}}  else {{$F[3]="wt" }} }} print join("\\t", @F); print "\n"' > {output}
+        """
+
+rule endmut:
+    input: cn="dtb_ampdel.txt", snv="dtb_snv.txt"
+    output: "genetic_annotation.tsv"
+    shell:
+        """
+           join -t $'\\t' <(head -n 1 {input.snv}) <(echo -e "sgen\\tMET\\tEGFR\\tHER2") > {output}
+           join -t $'\\t' <(sed 1d {input.snv} | sort -k1,1) <(sed 1d {input.cn} | sort -k1,1) >> {output}  
+        """
+
+# manual removal of duplicates TODO in gnumeric  :(
+#data@rotpunkt:~/work/stash/velocity/new$ cut -f 1 genetic_annotation.tsv |sort | uniq -d
+#CRC1063
+#CRC1144
+#CRC1169
+#CRC1182
+#CRC1331
+#CRC1599
+
+#### rule re-mut:
+rule keepLm:
+    input: "dtb_mutations_vlookupAndrea_expandedPRLM.tsv"
+    output: "dtb_mutations_april2021_LM.tsv"
+    shell: 
+        """
+            bawk '$2=="LM" || $2=="" || NR==1 {{print $1,$4,$5,$6,$7}}' {input} > {output}
+        """
+
+rule new_muts_filtered:
+    input: data="dtb_mutations_april2021_LM.tsv", filter="wanted_sgen"
+    output: "dtb_snv_april2021_velocity.tsv"
+    shell:
+        """
+            head -n1 {input.data} > {output}
+            filter_1col 1 {input.filter} < {input.data} >> {output}
+        """
+
+rule add_na:
+    input: data="dtb_snv_april2021_velocity.tsv", filter="wanted_sgen"
+    output: "dtb_snv_april2021_velocity_all.tsv"
+    shell:
+        """ 
+            cat {input.data} > {output}
+            filter_1col -v 1  <(cut -f 1 {input.data}) < {input.filter} | bawk '{{print $1,"NA","NA","NA","NA"}}' >> {output} 
+        """
+# Fix NA by hand to restore the few PR
+
+#data@rotpunkt:~/work/stash/velocity/new$ filter_1col -v 1  <(cut -f 1 dtb_snv_april2021_velocity.tsv) < wanted_sgen 
+#CRC0714
+#CRC1320
+#CRC1340
+#CRC1462
+#CRC1772
+
+rule new_amp_filtered:
+    input: data="dtb_mutations_amplifications_removedpairs2.tsv", filter="wanted_sgen"
+    output: "dtb_cn_april2021_velocity.tsv"
+    shell:
+        """
+            head -n1 {input.data} > {output}
+            filter_1col 1 {input.filter} < {input.data} >> {output}
+        """
+
+# rule add_na:
+#     input: data="dtb_snv_april2021_velocity.tsv", filter="wanted_sgen"
+#     output: "dtb_snv_april2021_velocity_all.tsv"
+#     shell:
+#         """ 
+#             cat {input.data} > {output}
+#             filter_1col -v 1  <(cut -f 1 {input.data}) < {input.filter} | bawk '{{print $1,"NA","NA","NA","NA"}}' >> {output} 
+#         """
+
+rule amp_filtered_correct:
+    input: data='/scratch/trcanmed/pdxopedia/dataset/misc_annots/binarized_cn.tsv',  filter="wanted_sgen"
+    output: "dtb_cn_feb2022_velocity.tsv"
+    shell:
+        """
+            head -n1 {input.data} | bawk '{{print "CASE", $1, $2, $3}}' > {output}
+            filter_1col 1 {input.filter} < {input.data} | sed 's/FALSE/wt/g' | sed 's/TRUE/ampl/g' >> {output}
+        """
