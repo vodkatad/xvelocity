@@ -55,7 +55,10 @@ alter_fun = list(
 opd <- t(odata)
 
 
-colors <- c("#A6CEE3","#1F78B4","#B2DF8A","#33A02C","#FB9A99","#E31A1C","#FDBF6F","#FF7F00","#CAB2D6")
+#colors <- c("#A6CEE3","#1F78B4","#B2DF8A","#33A02C","#FB9A99","#E31A1C","#FDBF6F","#FF7F00","#CAB2D6")
+#colors <- c("#33a02c","#fb9a99","#a6cee3","#1f78b4","#e31a1c","#ff7f00","#b2df8a","#f48114","#fdbf6f")
+colors <- c("#a8cddf","#a6d271","#2579b5","#339b2a","#d0b8da","#ed9798","#e8151c","#ffbb64","#ffe2a3")
+
 nc <- unique(c(annot$cluster))
 nc <- nc[!is.na(nc)]
 nc <- nc[order(nc)]
@@ -81,6 +84,8 @@ get_recist <- function(x) {
   return(res)
 }
 
+svg('/scratch/trcanmed/connector/local/share/data/CTGC_A5_paper.svg', width=13.578, height=3.38)#, units="in")
+
 colors <- list(CONNECTOR=connector_col, CRIS=cris_col)#, Cetuximab=cetuxi_col)
 oncoPrint(opd, alter_fun = alter_fun, col = col, 
                 column_order = rownames(odata),
@@ -96,6 +101,8 @@ oncoPrint(opd, alter_fun = alter_fun, col = col,
                                                    height = unit(4, "cm")),
                 right_annotation = NULL,
                 heatmap_height = unit(8, "cm"))
+
+graphics.off()
 
 
 data$mut <- apply(data[,c('KRAS','NRAS','BRAF', 'MET','ERBB2')], 1, function(x) {any(x!='wt')})
