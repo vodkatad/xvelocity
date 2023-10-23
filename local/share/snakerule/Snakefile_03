@@ -23,7 +23,7 @@ DATA=PRJ_ROOT+'/local/share/data/oct_2023'
 ### 312:T:Treatments - End date_0
 
 START_DATE_I = {
-    'cetuxi': 509, ## why in the others there is a -1 on each? pperl index start from 0
+    'cetuxi': 509, ## why in the others there is a -1 on each? perl index start from 0
     'irino': 189,
     'placebo': 309
 }
